@@ -1,0 +1,24 @@
+# This file defines the code owners for different parts of the repository
+# Each line is a file pattern followed by one or more owners
+# Order is important; the last matching pattern takes precedence
+
+# Default owners for everything in the repo
+* @platform-team
+
+# Cluster configurations
+/clusters/ @platform-team @k8s-admins
+
+# Jenkins configuration
+/jenkins/ @ci-team @platform-team
+
+# Infrastructure as code
+/infra/ @platform-team @infra-team
+/infra/modules/monitoring/ @monitoring-team @platform-team
+/infra/modules/rbac/ @security-team @platform-team
+
+# Applications
+/apps/ @app-developers @platform-team
+/apps/flask/ @flask-team @app-developers
+
+# Jenkins shared library
+/lib/ @ci-team @platform-team

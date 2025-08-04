@@ -1,0 +1,136 @@
+#!/usr/bin/env groovy
+
+/**
+ * Jenkinsfile for Infrastructure CI
+ *
+ * This pipeline automates the deployment of infrastructure components using OpenTofu/Terraform.
+ * It includes stages for initialization, validation, planning, and applying changes.
+ */
+
+pipeline {
+    agent {
+        kubernetes {
+            label 'jenkins-agent'
+            yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: tofu
+    image: ghcr.io/opentofu/opentofu:latest
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: kube-config
+      mountPath: /home/jenkins/.kube
+  volumes:
+  - name: kube-config
+    hostPath:
+      path: /root/.kube
+"""
+        }
+    }
+
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'staging', 'prod'],
+            description: 'Environment to deploy to'
+        )
+        booleanParam(
+            name: 'AUTO_APPROVE',
+            defaultValue: false,
+            description: 'Automatically approve Terraform plan'
+        )
+    }
+
+    environment {
+        TOFU_DIR = "envs/${params.ENVIRONMENT}"
+        TOFU_VARS = "-var-file=tofu.tfvars"
+        KUBECONFIG = "/home/jenkins/.kube/config"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Initialize') {
+            steps {
+                container('tofu') {
+                    dir("${TOFU_DIR}") {
+                        sh 'tofu init'
+                    }
+                }
+            }
+        }
+
+        stage('Validate') {
+            steps {
+                container('tofu') {
+                    dir("${TOFU_DIR}") {
+                        sh 'tofu validate'
+                        sh 'tofu fmt -check'
+                    }
+                }
+            }
+        }
+
+        stage('Plan') {
+            steps {
+                container('tofu') {
+                    dir("${TOFU_DIR}") {
+                        sh "tofu plan ${TOFU_VARS} -out=tfplan"
+                    }
+                }
+            }
+        }
+
+        stage('Approval') {
+            when {
+                expression { return !params.AUTO_APPROVE }
+            }
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    input message: "Apply Terraform plan for ${params.ENVIRONMENT}?", ok: 'Apply'
+                }
+            }
+        }
+
+        stage('Apply') {
+            steps {
+                container('tofu') {
+                    dir("${TOFU_DIR}") {
+                        sh 'tofu apply -auto-approve tfplan'
+                    }
+                }
+            }
+        }
+
+        stage('Output') {
+            steps {
+                container('tofu') {
+                    dir("${TOFU_DIR}") {
+                        sh 'tofu output'
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: "${TOFU_DIR}/tfplan", allowEmptyArchive: true
+            cleanWs()
+        }
+        success {
+            echo "Infrastructure deployment to ${params.ENVIRONMENT} completed successfully!"
+        }
+        failure {
+            echo "Infrastructure deployment to ${params.ENVIRONMENT} failed!"
+        }
+    }
+}

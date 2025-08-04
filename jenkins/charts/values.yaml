@@ -1,0 +1,229 @@
+# Default values for Jenkins Helm chart
+# This is a YAML-formatted file.
+
+controller:
+  # Jenkins controller configurations
+  image:
+    registry: "docker.io"
+    repository: "jenkins/jenkins"
+    tag: "lts-jdk11"
+  imagePullPolicy: IfNotPresent
+
+  # Admin user credentials
+  admin:
+    username: "admin"
+    password: "admin"  # Should be replaced with a secret in production
+
+  # JCasC configuration
+  JCasC:
+    enabled: true
+    defaultConfig: false
+    configScripts:
+      jenkins-config: |
+        jenkins:
+          systemMessage: "Jenkins configured automatically by Jenkins Configuration as Code plugin"
+          numExecutors: 0  # No executors on controller
+          mode: EXCLUSIVE  # Only build on agents
+          scmCheckoutRetryCount: 3
+
+          authorizationStrategy:
+            loggedInUsersCanDoAnything:
+              allowAnonymousRead: false
+
+          securityRealm:
+            local:
+              allowsSignup: false
+              users:
+                - id: "admin"
+                  password: "${ADMIN_PASSWORD:-admin}"
+
+          clouds:
+            - kubernetes:
+                name: "kubernetes"
+                serverUrl: "https://kubernetes.default.svc.cluster.local"
+                namespace: "${NAMESPACE:-jenkins}"
+                jenkinsUrl: "http://jenkins.${NAMESPACE:-jenkins}.svc.cluster.local:8080"
+                jenkinsTunnel: "jenkins-agent.${NAMESPACE:-jenkins}.svc.cluster.local:50000"
+                connectTimeout: 5
+                readTimeout: 15
+                containerCapStr: "10"
+                maxRequestsPerHostStr: "32"
+                retentionTimeout: 5
+                templates:
+                  - name: "jenkins-agent"
+                    namespace: "${NAMESPACE:-jenkins}"
+                    label: "jenkins-agent"
+                    nodeUsageMode: EXCLUSIVE
+                    containers:
+                      - name: "jnlp"
+                        image: "jenkins/inbound-agent:latest-jdk11"
+                        alwaysPullImage: false
+                        workingDir: "/home/jenkins/agent"
+                        ttyEnabled: true
+                        resourceRequestCpu: "500m"
+                        resourceRequestMemory: "512Mi"
+                        resourceLimitCpu: "1000m"
+                        resourceLimitMemory: "1Gi"
+                    idleMinutes: 0
+                    activeDeadlineSeconds: 180
+                    slaveConnectTimeout: 180
+
+          crumbIssuer:
+            standard:
+              excludeClientIPFromCrumb: true
+
+        # Removed queueItemAuthenticator configuration that was causing issues
+
+        unclassified:
+          location:
+            url: "http://jenkins.local/"
+
+          globalLibraries:
+            libraries:
+              - name: "shared-library"
+                defaultVersion: "main"
+                implicit: true
+                allowVersionOverride: true
+                includeInChangesets: true
+                retriever:
+                  modernSCM:
+                    scm:
+                      git:
+                        remote: "file:///var/jenkins_home/shared-libraries/lib"
+                        credentialsId: "git-credentials"
+
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  - usernamePassword:
+                      scope: GLOBAL
+                      id: "git-credentials"
+                      username: "git"
+                      password: "${GIT_PASSWORD:-password}"
+                      description: "Git credentials"
+
+        jobs:
+          - script: >
+              folder('infrastructure') {
+                displayName('Infrastructure')
+                description('Infrastructure jobs')
+              }
+              
+              folder('applications') {
+                displayName('Applications')
+                description('Application jobs')
+              }
+              
+              pipelineJob('infrastructure/terraform-apply') {
+                definition {
+                  cpsScm {
+                    scm {
+                      git {
+                        remote {
+                          url('file:///var/jenkins_home/workspace/infra')
+                        }
+                        branch('*/main')
+                      }
+                    }
+                    scriptPath('Jenkinsfile')
+                  }
+                }
+              }
+              
+              pipelineJob('applications/flask-app') {
+                definition {
+                  cpsScm {
+                    scm {
+                      git {
+                        remote {
+                          url('file:///var/jenkins_home/workspace/apps/flask')
+                        }
+                        branch('*/main')
+                      }
+                    }
+                    scriptPath('Jenkinsfile')
+                  }
+                }
+              }
+
+  # Additional plugins to install
+  installPlugins:
+    - kubernetes:latest
+    - workflow-aggregator:latest
+    - git:latest
+    - configuration-as-code:latest
+    - job-dsl:latest
+    - blueocean:latest
+    - pipeline-utility-steps:latest
+    - kubernetes-credentials-provider:latest
+    - credentials-binding:latest
+    - docker-workflow:latest
+
+  # Resources for the Jenkins controller
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+
+  # Jenkins controller service configuration
+  serviceType: NodePort
+  servicePort: 8080
+
+  # Persistence for Jenkins data
+  persistence:
+    enabled: true
+    size: "10Gi"
+    storageClass: "standard"
+
+  # Java options for the Jenkins controller
+  javaOpts: "-Xmx2g -Xms1g -XX:MaxRAMPercentage=60.0 -XX:+UseG1GC"
+
+  # Additional environment variables
+  containerEnv: []
+
+# Agent configurations
+agent:
+  enabled: true
+  image:
+    repository: "jenkins/inbound-agent"
+    tag: "latest-jdk11"
+
+  # Resources for Jenkins agents
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  # Number of executors per agent
+  componentName: "jenkins-agent"
+
+# RBAC configuration
+rbac:
+  create: true
+
+# ServiceAccount configuration
+serviceAccount:
+  create: true
+  name: "jenkins"
+  annotations:
+    kubernetes.io/service-account.name: "jenkins"
+
+# Ingress configuration
+ingress:
+  enabled: true
+  apiVersion: "networking.k8s.io/v1"
+  hostName: "jenkins.local"
+  tls: []
+
+# Prometheus metrics
+prometheus:
+  enabled: true
+  serviceMonitorNamespace: "monitoring"
+

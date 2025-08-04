@@ -1,0 +1,88 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Lint Kubernetes manifests
+        run: |
+          echo "Running kubeval on Kubernetes manifests"
+          # This would normally use kubeval or similar tool
+          # Example: find . -name "*.yaml" -not -path "./node_modules/*" | xargs kubeval
+
+      - name: Lint Terraform/OpenTofu
+        run: |
+          echo "Running tflint on Terraform/OpenTofu files"
+          # This would normally use tflint or similar tool
+          # Example: cd infra && tflint
+
+      - name: Lint Dockerfiles
+        run: |
+          echo "Running hadolint on Dockerfiles"
+          # This would normally use hadolint or similar tool
+          # Example: find . -name "Dockerfile" | xargs hadolint
+
+  test-flask-app:
+    name: Test Flask App
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          cd apps/flask
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: |
+          cd apps/flask
+          pytest
+
+  validate-helm-charts:
+    name: Validate Helm Charts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Lint Helm charts
+        run: |
+          find apps -path "*/charts/*" -type d | while read chart; do
+            echo "Linting chart: $chart"
+            helm lint $chart
+          done
+
+  notify-jenkins:
+    name: Notify Jenkins
+    runs-on: ubuntu-latest
+    needs: [lint, test-flask-app, validate-helm-charts]
+    if: success()
+    steps:
+      - name: Notify Jenkins
+        run: |
+          echo "This step would normally trigger a Jenkins job via webhook"
+          # Example: curl -X POST "https://jenkins.example.com/job/PR-Validation/buildWithParameters?token=${{ secrets.JENKINS_TOKEN }}&PR_NUMBER=${{ github.event.pull_request.number }}"

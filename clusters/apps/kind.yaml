@@ -1,0 +1,29 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: apps-cluster
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 8081  # Different from dev cluster to avoid conflicts
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 8444  # Changed from 8443 to avoid port conflict with minikube
+    protocol: TCP
+  - containerPort: 5000
+    hostPort: 30001
+    protocol: TCP  # For Flask app (using nodePort range 30000-32767)
+- role: worker
+- role: worker
+- role: worker  # Extra worker for applications
+
+# Simplified networking configuration
+networking:
+  apiServerAddress: "127.0.0.1"
+  apiServerPort: 6444  # Different from dev cluster to avoid conflicts
